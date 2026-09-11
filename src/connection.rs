@@ -1,25 +1,31 @@
 use crate::bindings;
+use crate::compat::usize_to_count;
+use crate::config::EncryptionMode;
+use crate::constants;
 use crate::destination::{DestCallback, Destination};
 use crate::error::{Error, Result};
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
+use std::net::IpAddr;
 use std::os::raw::{c_int, c_void};
 use std::ptr;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Connection flags for controlling how to connect to a destination
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionFlags {
     /// Connect to CUPS scheduler
-    Scheduler = 0,
+    Scheduler,
     /// Connect directly to device/printer
-    Device = 1,
+    Device,
 }
 
 impl From<ConnectionFlags> for u32 {
     fn from(flags: ConnectionFlags) -> u32 {
         match flags {
-            ConnectionFlags::Scheduler => 0,
-            ConnectionFlags::Device => 1,
+            ConnectionFlags::Scheduler => constants::DEST_FLAGS_NONE,
+            ConnectionFlags::Device => constants::DEST_FLAGS_DEVICE,
         }
     }
 }
@@ -62,6 +68,57 @@ impl HttpConnection {
         })
     }
 
+    /// Connect directly to a host with an explicit encryption policy
+    pub fn connect_host_with_encryption(
+        host: &str,
+        port: u16,
+        resource: &str,
+        encryption: EncryptionMode,
+        timeout_ms: Option<i32>,
+    ) -> Result<Self> {
+        let host = CString::new(host)?;
+
+        #[cfg(cups3)]
+        let http = unsafe {
+            bindings::httpConnect(
+                host.as_ptr(),
+                port.into(),
+                ptr::null_mut(),
+                0,
+                encryption.into(),
+                true,
+                timeout_ms.unwrap_or(-1),
+                ptr::null_mut(),
+            )
+        };
+
+        #[cfg(cups2)]
+        let http = unsafe {
+            bindings::httpConnect2(
+                host.as_ptr(),
+                port.into(),
+                ptr::null_mut(),
+                0,
+                encryption.into(),
+                1,
+                timeout_ms.unwrap_or(-1),
+                ptr::null_mut(),
+            )
+        };
+        if http.is_null() {
+            return Err(Error::ConnectionFailed(format!(
+                "Failed to connect to {}",
+                resource
+            )));
+        }
+
+        Ok(HttpConnection {
+            http,
+            resource: resource.to_string(),
+            _phantom: PhantomData,
+        })
+    }
+
     /// Get the raw pointer to the http_t structure
     pub fn as_ptr(&self) -> *mut bindings::_http_s {
         self.http
@@ -70,6 +127,80 @@ impl HttpConnection {
     /// Get the resource path for this connection
     pub fn resource_path(&self) -> &str {
         &self.resource
+    }
+
+    /// Set how long the peer may stay silent before a read or write gives up
+    pub fn set_timeout(&mut self, seconds: f64) {
+        unsafe {
+            bindings::httpSetTimeout(self.http, seconds, None, ptr::null_mut());
+        }
+    }
+
+    /// Get the hostname this connection reached
+    pub fn hostname(&self) -> Option<String> {
+        let mut buffer = [0 as ::std::os::raw::c_char; 1024];
+        let hostname = unsafe {
+            bindings::httpGetHostname(self.http, buffer.as_mut_ptr(), usize_to_count(buffer.len()))
+        };
+        if hostname.is_null() {
+            return None;
+        }
+
+        Some(
+            unsafe { CStr::from_ptr(hostname) }
+                .to_string_lossy()
+                .trim_end_matches('.')
+                .to_string(),
+        )
+        .filter(|hostname| !hostname.is_empty())
+    }
+
+    /// Get the address this connection resolved to
+    pub fn address(&self) -> Option<IpAddr> {
+        let address = unsafe { bindings::httpGetAddress(self.http) };
+        if address.is_null() {
+            return None;
+        }
+
+        let mut buffer = [0 as ::std::os::raw::c_char; 128];
+
+        #[cfg(cups3)]
+        let value =
+            unsafe { bindings::httpAddrGetString(address, buffer.as_mut_ptr(), buffer.len()) };
+
+        #[cfg(cups2)]
+        let value = unsafe {
+            bindings::httpAddrString(address, buffer.as_mut_ptr(), usize_to_count(buffer.len()))
+        };
+        if value.is_null() {
+            return None;
+        }
+
+        // CUPS writes an IPv6 address the way a URI carries it, as `[v1.::1]`.
+        let value = unsafe { CStr::from_ptr(value) }.to_str().ok()?;
+        let value = value
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .unwrap_or(value);
+        let value = value.strip_prefix("v1.").unwrap_or(value);
+
+        IpAddr::from_str(value).ok()
+    }
+
+    /// Get the port this connection reached
+    pub fn port(&self) -> Option<u16> {
+        let address = unsafe { bindings::httpGetAddress(self.http) };
+        if address.is_null() {
+            return None;
+        }
+
+        #[cfg(cups3)]
+        let port = unsafe { bindings::httpAddrGetPort(address) };
+
+        #[cfg(cups2)]
+        let port = unsafe { bindings::httpAddrPort(address) };
+
+        u16::try_from(port).ok()
     }
 
     /// Close the HTTP connection
@@ -335,8 +466,40 @@ mod tests {
 
     #[test]
     fn test_connection_flags() {
-        assert_eq!(u32::from(ConnectionFlags::Scheduler), 0);
-        assert_eq!(u32::from(ConnectionFlags::Device), 1);
+        assert_eq!(
+            u32::from(ConnectionFlags::Scheduler),
+            constants::DEST_FLAGS_NONE
+        );
+        assert_eq!(
+            u32::from(ConnectionFlags::Device),
+            constants::DEST_FLAGS_DEVICE
+        );
+        // The value this used to send asks not to connect at all, which reaches the
+        // scheduler's copy of the queue instead of the printer.
+        assert_ne!(
+            u32::from(ConnectionFlags::Device),
+            constants::DEST_FLAGS_UNCONNECTED
+        );
+    }
+
+    #[test]
+    fn test_connect_host_reports_its_endpoint() {
+        let connection = HttpConnection::connect_host_with_encryption(
+            "localhost",
+            631,
+            "/",
+            EncryptionMode::IfRequested,
+            Some(1000),
+        );
+        let Ok(connection) = connection else {
+            // No scheduler listening in this environment, which is OK.
+            return;
+        };
+
+        assert!(connection.is_connected());
+        assert_eq!(connection.resource_path(), "/");
+        assert_eq!(connection.port(), Some(631));
+        assert!(connection.address().is_some());
     }
 
     #[test]

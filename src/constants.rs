@@ -1,29 +1,32 @@
 //! Constants for CUPS options and values
 
-#[cfg(cups3)]
 use crate::bindings;
 
 // Destination flags
 #[cfg(cups3)]
 pub const DEST_FLAGS_NONE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_NONE;
 #[cfg(cups2)]
-pub const DEST_FLAGS_NONE: u32 = 0;
+pub const DEST_FLAGS_NONE: u32 = bindings::CUPS_DEST_FLAGS_NONE;
+#[cfg(cups3)]
+pub const DEST_FLAGS_UNCONNECTED: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_UNCONNECTED;
+#[cfg(cups2)]
+pub const DEST_FLAGS_UNCONNECTED: u32 = bindings::CUPS_DEST_FLAGS_UNCONNECTED;
 #[cfg(cups3)]
 pub const DEST_FLAGS_MORE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_MORE;
 #[cfg(cups2)]
-pub const DEST_FLAGS_MORE: u32 = 1 << 0;
+pub const DEST_FLAGS_MORE: u32 = bindings::CUPS_DEST_FLAGS_MORE;
 #[cfg(cups3)]
 pub const DEST_FLAGS_REMOVED: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_REMOVED;
 #[cfg(cups2)]
-pub const DEST_FLAGS_REMOVED: u32 = 1 << 1;
+pub const DEST_FLAGS_REMOVED: u32 = bindings::CUPS_DEST_FLAGS_REMOVED;
 #[cfg(cups3)]
 pub const DEST_FLAGS_ERROR: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_ERROR;
 #[cfg(cups2)]
-pub const DEST_FLAGS_ERROR: u32 = 1 << 2;
+pub const DEST_FLAGS_ERROR: u32 = bindings::CUPS_DEST_FLAGS_ERROR;
 #[cfg(cups3)]
 pub const DEST_FLAGS_DEVICE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_DEVICE;
 #[cfg(cups2)]
-pub const DEST_FLAGS_DEVICE: u32 = 1 << 3;
+pub const DEST_FLAGS_DEVICE: u32 = bindings::CUPS_DEST_FLAGS_DEVICE;
 
 // Printer types
 #[cfg(cups3)]
