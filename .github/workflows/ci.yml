@@ -81,20 +81,10 @@ jobs:
 
       # CUPS 3
       #
-      # CUPS 3 isn't packaged by Ubuntu, so build it from source.
-      # Cache the installed copy so we don't rebuild it every run.
+      # CUPS 3 isn't packaged by Ubuntu, so build it from source every run.
       #
-      - name: Cache CUPS 3
-        if: matrix.feature == 'force-cups3'
-        id: cache-libcups3
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/libcups3
-          key: libcups3-${{ env.LIBCUPS3_VERSION }}-${{ runner.os }}
-
-
       - name: Install CUPS 3 dependencies
-        if: matrix.feature == 'force-cups3' && steps.cache-libcups3.outputs.cache-hit != 'true'
+        if: matrix.feature == 'force-cups3'
         run: |
           sudo apt-get install -y \
             build-essential \
@@ -107,7 +97,7 @@ jobs:
 
 
       - name: Build CUPS 3
-        if: matrix.feature == 'force-cups3' && steps.cache-libcups3.outputs.cache-hit != 'true'
+        if: matrix.feature == 'force-cups3'
         run: |
           git clone \
             --depth 1 \
@@ -126,7 +116,7 @@ jobs:
           # CUPS runs ldconfig as part of install, so this needs sudo.
           sudo make install
 
-          # Give the runner user ownership of the cached files.
+          # sudo make install left these owned by root.
           sudo chown -R "$(id -u):$(id -g)" "$HOME/.local/libcups3"
 
 

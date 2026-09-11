@@ -34,6 +34,7 @@ use crate::bindings;
 use crate::compat::{count_to_usize, usize_to_count};
 use crate::connection::HttpConnection;
 use crate::error::{Error, Result};
+use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::ptr;
@@ -50,6 +51,7 @@ pub enum IppTag {
     Subscription,
     EventNotification,
     Document,
+    System,
     UnsupportedGroup,
 }
 
@@ -63,8 +65,27 @@ impl From<IppTag> for bindings::ipp_tag_t {
             IppTag::Subscription => bindings::ipp_tag_e_IPP_TAG_SUBSCRIPTION,
             IppTag::EventNotification => bindings::ipp_tag_e_IPP_TAG_EVENT_NOTIFICATION,
             IppTag::Document => bindings::ipp_tag_e_IPP_TAG_DOCUMENT,
+            IppTag::System => bindings::ipp_tag_e_IPP_TAG_SYSTEM,
             IppTag::UnsupportedGroup => bindings::ipp_tag_e_IPP_TAG_UNSUPPORTED_GROUP,
         }
+    }
+}
+
+impl IppTag {
+    /// Convert a raw group tag back into a known group
+    pub(crate) fn from_code(code: bindings::ipp_tag_t) -> Option<Self> {
+        Some(match code {
+            bindings::ipp_tag_e_IPP_TAG_ZERO => Self::Zero,
+            bindings::ipp_tag_e_IPP_TAG_OPERATION => Self::Operation,
+            bindings::ipp_tag_e_IPP_TAG_JOB => Self::Job,
+            bindings::ipp_tag_e_IPP_TAG_PRINTER => Self::Printer,
+            bindings::ipp_tag_e_IPP_TAG_SUBSCRIPTION => Self::Subscription,
+            bindings::ipp_tag_e_IPP_TAG_EVENT_NOTIFICATION => Self::EventNotification,
+            bindings::ipp_tag_e_IPP_TAG_DOCUMENT => Self::Document,
+            bindings::ipp_tag_e_IPP_TAG_SYSTEM => Self::System,
+            bindings::ipp_tag_e_IPP_TAG_UNSUPPORTED_GROUP => Self::UnsupportedGroup,
+            _ => return None,
+        })
     }
 }
 
@@ -84,6 +105,7 @@ pub enum IppValueTag {
     Charset,
     Language,
     MimeType,
+    BeginCollection,
 }
 
 impl From<IppValueTag> for bindings::ipp_tag_t {
@@ -100,7 +122,33 @@ impl From<IppValueTag> for bindings::ipp_tag_t {
             IppValueTag::Charset => bindings::ipp_tag_e_IPP_TAG_CHARSET,
             IppValueTag::Language => bindings::ipp_tag_e_IPP_TAG_LANGUAGE,
             IppValueTag::MimeType => bindings::ipp_tag_e_IPP_TAG_MIMETYPE,
+            IppValueTag::BeginCollection => bindings::ipp_tag_e_IPP_TAG_BEGIN_COLLECTION,
         }
+    }
+}
+
+impl IppValueTag {
+    /// Convert a raw value tag back into a known type, defaulting to `String`
+    pub(crate) fn from_code(code: bindings::ipp_tag_t) -> Self {
+        match code {
+            bindings::ipp_tag_e_IPP_TAG_INTEGER => Self::Integer,
+            bindings::ipp_tag_e_IPP_TAG_BOOLEAN => Self::Boolean,
+            bindings::ipp_tag_e_IPP_TAG_ENUM => Self::Enum,
+            bindings::ipp_tag_e_IPP_TAG_STRING => Self::String,
+            bindings::ipp_tag_e_IPP_TAG_TEXT => Self::Text,
+            bindings::ipp_tag_e_IPP_TAG_NAME => Self::Name,
+            bindings::ipp_tag_e_IPP_TAG_KEYWORD => Self::Keyword,
+            bindings::ipp_tag_e_IPP_TAG_URI => Self::Uri,
+            bindings::ipp_tag_e_IPP_TAG_CHARSET => Self::Charset,
+            bindings::ipp_tag_e_IPP_TAG_LANGUAGE => Self::Language,
+            bindings::ipp_tag_e_IPP_TAG_MIMETYPE => Self::MimeType,
+            bindings::ipp_tag_e_IPP_TAG_BEGIN_COLLECTION => Self::BeginCollection,
+            _ => Self::String,
+        }
+    }
+
+    fn is_text_like(self) -> bool {
+        matches!(self, Self::Text | Self::Name | Self::Keyword | Self::Uri)
     }
 }
 
@@ -117,8 +165,24 @@ pub enum IppOperation {
     GetJobAttributes,
     GetJobs,
     GetPrinterAttributes,
+    HoldJob,
+    ReleaseJob,
     PausePrinter,
     ResumePrinter,
+    CupsAddModifyPrinter,
+    CupsCreateLocalPrinter,
+    CupsDeletePrinter,
+    CupsSetDefault,
+    CupsMoveJob,
+    SetPrinterAttributes,
+    EnablePrinter,
+    DisablePrinter,
+    CreatePrinter,
+    DeletePrinter,
+    GetPrinters,
+    GetSystemAttributes,
+    /// An operation code not covered above, e.g. a vendor extension
+    Other(u16),
 }
 
 impl From<IppOperation> for bindings::ipp_op_t {
@@ -132,8 +196,25 @@ impl From<IppOperation> for bindings::ipp_op_t {
             IppOperation::GetJobAttributes => bindings::ipp_op_e_IPP_OP_GET_JOB_ATTRIBUTES,
             IppOperation::GetJobs => bindings::ipp_op_e_IPP_OP_GET_JOBS,
             IppOperation::GetPrinterAttributes => bindings::ipp_op_e_IPP_OP_GET_PRINTER_ATTRIBUTES,
+            IppOperation::HoldJob => bindings::ipp_op_e_IPP_OP_HOLD_JOB,
+            IppOperation::ReleaseJob => bindings::ipp_op_e_IPP_OP_RELEASE_JOB,
             IppOperation::PausePrinter => bindings::ipp_op_e_IPP_OP_PAUSE_PRINTER,
             IppOperation::ResumePrinter => bindings::ipp_op_e_IPP_OP_RESUME_PRINTER,
+            IppOperation::CupsAddModifyPrinter => bindings::ipp_op_e_IPP_OP_CUPS_ADD_MODIFY_PRINTER,
+            IppOperation::CupsCreateLocalPrinter => {
+                bindings::ipp_op_e_IPP_OP_CUPS_CREATE_LOCAL_PRINTER
+            }
+            IppOperation::CupsDeletePrinter => bindings::ipp_op_e_IPP_OP_CUPS_DELETE_PRINTER,
+            IppOperation::CupsSetDefault => bindings::ipp_op_e_IPP_OP_CUPS_SET_DEFAULT,
+            IppOperation::CupsMoveJob => bindings::ipp_op_e_IPP_OP_CUPS_MOVE_JOB,
+            IppOperation::SetPrinterAttributes => bindings::ipp_op_e_IPP_OP_SET_PRINTER_ATTRIBUTES,
+            IppOperation::EnablePrinter => bindings::ipp_op_e_IPP_OP_ENABLE_PRINTER,
+            IppOperation::DisablePrinter => bindings::ipp_op_e_IPP_OP_DISABLE_PRINTER,
+            IppOperation::CreatePrinter => bindings::ipp_op_e_IPP_OP_CREATE_PRINTER,
+            IppOperation::DeletePrinter => bindings::ipp_op_e_IPP_OP_DELETE_PRINTER,
+            IppOperation::GetPrinters => bindings::ipp_op_e_IPP_OP_GET_PRINTERS,
+            IppOperation::GetSystemAttributes => bindings::ipp_op_e_IPP_OP_GET_SYSTEM_ATTRIBUTES,
+            IppOperation::Other(code) => bindings::ipp_op_t::from(code),
         }
     }
 }
@@ -157,7 +238,9 @@ pub enum IppStatus {
     ErrorRequestEntity,
     ErrorRequestValue,
     ErrorDocumentFormatNotSupported,
+    ErrorOperationNotSupported,
     ErrorConflicting,
+    ErrorAttributesNotSettable,
     ErrorPrinterIsDeactivated,
     ErrorTooManyJobs,
     ErrorInternalError,
@@ -186,7 +269,13 @@ impl IppStatus {
             bindings::ipp_status_e_IPP_STATUS_ERROR_DOCUMENT_FORMAT_NOT_SUPPORTED => {
                 IppStatus::ErrorDocumentFormatNotSupported
             }
+            bindings::ipp_status_e_IPP_STATUS_ERROR_OPERATION_NOT_SUPPORTED => {
+                IppStatus::ErrorOperationNotSupported
+            }
             bindings::ipp_status_e_IPP_STATUS_ERROR_CONFLICTING => IppStatus::ErrorConflicting,
+            bindings::ipp_status_e_IPP_STATUS_ERROR_ATTRIBUTES_NOT_SETTABLE => {
+                IppStatus::ErrorAttributesNotSettable
+            }
             bindings::ipp_status_e_IPP_STATUS_ERROR_PRINTER_IS_DEACTIVATED => {
                 IppStatus::ErrorPrinterIsDeactivated
             }
@@ -418,6 +507,43 @@ impl IppRequest {
             })
         }
     }
+
+    /// Send this request to the default CUPS scheduler connection.
+    pub fn send_default(&self, resource: &str) -> Result<IppResponse> {
+        let resource_c = CString::new(resource)?;
+
+        let request_copy = unsafe { bindings::ippNew() };
+        if request_copy.is_null() {
+            return Err(Error::UnsupportedFeature(
+                "Failed to copy IPP request".to_string(),
+            ));
+        }
+
+        unsafe {
+            bindings::ippSetOperation(request_copy, bindings::ippGetOperation(self.ipp));
+            bindings::ippSetRequestId(request_copy, bindings::ippGetRequestId(self.ipp));
+
+            #[cfg(cups3)]
+            bindings::ippCopyAttributes(request_copy, self.ipp, false, None, ptr::null_mut());
+
+            #[cfg(cups2)]
+            bindings::ippCopyAttributes(request_copy, self.ipp, 0, None, ptr::null_mut());
+        }
+
+        let response =
+            unsafe { bindings::cupsDoRequest(ptr::null_mut(), request_copy, resource_c.as_ptr()) };
+
+        if response.is_null() {
+            Err(Error::ServerError(
+                "No response received from server".to_string(),
+            ))
+        } else {
+            Ok(IppResponse {
+                ipp: response,
+                _phantom: PhantomData,
+            })
+        }
+    }
 }
 
 impl Drop for IppRequest {
@@ -468,9 +594,38 @@ impl IppResponse {
         IppStatus::from_code(status_code)
     }
 
+    /// Get the raw status code
+    pub fn status_code(&self) -> u16 {
+        unsafe { bindings::ippGetStatusCode(self.ipp) as u16 }
+    }
+
     /// Check if the response indicates success
     pub fn is_successful(&self) -> bool {
         self.status().is_successful()
+    }
+
+    /// Get every attribute with this name
+    pub fn attributes_named(&self, name: &str) -> Vec<IppAttribute> {
+        let Ok(name_c) = CString::new(name) else {
+            return Vec::new();
+        };
+
+        let mut found = Vec::new();
+        let mut attr = unsafe {
+            bindings::ippFindAttribute(self.ipp, name_c.as_ptr(), bindings::ipp_tag_e_IPP_TAG_ZERO)
+        };
+        while !attr.is_null() {
+            found.push(IppAttribute { attr });
+            attr = unsafe {
+                bindings::ippFindNextAttribute(
+                    self.ipp,
+                    name_c.as_ptr(),
+                    bindings::ipp_tag_e_IPP_TAG_ZERO,
+                )
+            };
+        }
+
+        found
     }
 
     /// Find an attribute by name
@@ -559,6 +714,16 @@ impl IppAttribute {
         count_to_usize(unsafe { bindings::ippGetCount(self.attr) })
     }
 
+    /// Get the value type
+    pub fn value_tag(&self) -> IppValueTag {
+        IppValueTag::from_code(unsafe { bindings::ippGetValueTag(self.attr) })
+    }
+
+    /// Get the attribute group
+    pub fn group_tag(&self) -> Option<IppTag> {
+        IppTag::from_code(unsafe { bindings::ippGetGroupTag(self.attr) })
+    }
+
     /// Get a string value
     pub fn get_string(&self, index: usize) -> Option<String> {
         unsafe {
@@ -568,6 +733,29 @@ impl IppAttribute {
                 None
             } else {
                 Some(CStr::from_ptr(value_ptr).to_string_lossy().into_owned())
+            }
+        }
+    }
+
+    /// Get an octetString value
+    pub fn get_octet_string(&self, index: usize) -> Option<Vec<u8>> {
+        unsafe {
+            #[cfg(cups3)]
+            let mut length: usize = 0;
+
+            #[cfg(cups2)]
+            let mut length: i32 = 0;
+
+            #[cfg(cups3)]
+            let data = bindings::ippGetOctetString(self.attr, index, &mut length);
+
+            #[cfg(cups2)]
+            let data = bindings::ippGetOctetString(self.attr, usize_to_count(index), &mut length);
+
+            if data.is_null() {
+                None
+            } else {
+                Some(std::slice::from_raw_parts(data as *const u8, length as usize).to_vec())
             }
         }
     }
@@ -590,6 +778,57 @@ impl IppAttribute {
         {
             value != 0
         }
+    }
+
+    /// Get collection values as name-value maps
+    pub fn collections(&self) -> Vec<HashMap<String, String>> {
+        if self.value_tag() != IppValueTag::BeginCollection {
+            return Vec::new();
+        }
+
+        (0..self.count())
+            .filter_map(|index| self.collection_at(index))
+            .collect()
+    }
+
+    fn collection_at(&self, index: usize) -> Option<HashMap<String, String>> {
+        let collection = unsafe { bindings::ippGetCollection(self.attr, usize_to_count(index)) };
+        if collection.is_null() {
+            return None;
+        }
+
+        let mut members = HashMap::new();
+
+        #[cfg(cups3)]
+        let mut attr = unsafe { bindings::ippGetFirstAttribute(collection) };
+
+        #[cfg(cups2)]
+        let mut attr = unsafe { bindings::ippFirstAttribute(collection) };
+
+        while !attr.is_null() {
+            let member = IppAttribute { attr };
+            if let Some(name) = member.name()
+                && member.value_tag().is_text_like()
+                && let Some(value) = member.get_string(0)
+            {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    members.insert(name, trimmed.to_string());
+                }
+            }
+
+            #[cfg(cups3)]
+            {
+                attr = unsafe { bindings::ippGetNextAttribute(collection) };
+            }
+
+            #[cfg(cups2)]
+            {
+                attr = unsafe { bindings::ippNextAttribute(collection) };
+            }
+        }
+
+        Some(members)
     }
 }
 
