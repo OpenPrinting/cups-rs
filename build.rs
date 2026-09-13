@@ -51,6 +51,11 @@ fn main() {
         .allowlist_type("ipp_.*")
         .allowlist_var("IPP_.*");
 
+    // Lets wrapper.h include cups/dnssd.h, which only CUPS 3 has.
+    if cups_cfg == "cups3" {
+        builder = builder.clang_arg("-DCUPS_RS_CUPS3");
+    }
+
     for include_path in library.include_paths {
         builder = builder.clang_arg(format!("-I{}", include_path.display()));
     }
