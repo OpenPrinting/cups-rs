@@ -143,6 +143,17 @@ pub mod constants;
 /// - Resolve option conflicts
 pub mod destination;
 
+/// DNS Service Discovery browsing and service resolution
+///
+/// Find printers and other services on the local network:
+/// - Browse a service type as services appear and disappear
+/// - Resolve a service to its hostname, port and TXT record
+/// - Query a resolved service for its addresses
+///
+/// Requires CUPS 3 — `cups/dnssd.h` has no CUPS 2 equivalent.
+#[cfg(cups3)]
+pub mod dnssd;
+
 mod error;
 mod error_helpers;
 
@@ -182,6 +193,11 @@ pub use destination::{
     Destination, DestinationInfo, Destinations, MediaSize, OptionConflict, PrinterState, copy_dest,
     enum_destinations, find_destinations, get_all_destinations, get_default_destination,
     get_destination, remove_dest,
+};
+#[cfg(cups3)]
+pub use dnssd::{
+    Dnssd, DnssdBrowseEvent, DnssdBrowser, DnssdResolveEvent, DnssdResolvedService, DnssdResolver,
+    DnssdServiceResolver,
 };
 pub use error::{Error, ErrorCategory, Result};
 pub use ipp::{
