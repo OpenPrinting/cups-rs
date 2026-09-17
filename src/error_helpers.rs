@@ -42,6 +42,10 @@ pub fn cups_error_to_our_error(operation: &str, dest_name: Option<&str>) -> Erro
             Error::PrinterNotAccepting(dest_name.unwrap_or("unknown").to_string(), message.clone())
         }
 
+        bindings::ipp_status_e_IPP_STATUS_ERROR_NOT_ACCEPTING_JOBS => {
+            Error::PrinterNotAccepting(dest_name.unwrap_or("unknown").to_string(), message.clone())
+        }
+
         _ => {
             if message.contains("offline") || message.contains("unreachable") {
                 Error::PrinterOffline(dest_name.unwrap_or("unknown").to_string())
