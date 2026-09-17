@@ -219,8 +219,10 @@ impl Destination {
         let dinfo = unsafe { bindings::cupsCopyDestInfo(http, dest_ptr) };
 
         unsafe {
-            if !options_ptr.is_null() {
-                bindings::cupsFreeOptions(num_options, options_ptr);
+            // cupsCopyDestInfo can reallocate the options array, so free the
+            // current one rather than the one passed in
+            if !dest.options.is_null() {
+                bindings::cupsFreeOptions(dest.num_options, dest.options);
             }
 
             if !dest.name.is_null() {
@@ -290,7 +292,7 @@ impl Destination {
                     }
                 }
 
-                let dest = bindings::cups_dest_s {
+                let mut dest = bindings::cups_dest_s {
                     name: name_c.into_raw(),
                     instance: match instance_c {
                         Some(s) => s.into_raw(),
@@ -302,16 +304,12 @@ impl Destination {
                 };
 
                 // Check if the option is supported
-                let result = info.is_option_supported(
-                    http,
-                    &dest as *const bindings::cups_dest_s as *mut bindings::cups_dest_s,
-                    option,
-                );
+                let result = info.is_option_supported(http, &mut dest, option);
 
                 // Free the resources
                 unsafe {
-                    if !options_ptr.is_null() {
-                        bindings::cupsFreeOptions(num_options, options_ptr);
+                    if !dest.options.is_null() {
+                        bindings::cupsFreeOptions(dest.num_options, dest.options);
                     }
 
                     // Need to free the raw strings we created
