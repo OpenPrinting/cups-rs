@@ -713,6 +713,125 @@ impl Destinations {
         }
     }
 
+    /// Get a destination's saved options via `cupsGetNamedDest`
+    pub fn named_destination(name: &str, instance: Option<&str>) -> Option<Destination> {
+        let name_c = CString::new(name).ok()?;
+        let instance_c = instance.and_then(|instance| CString::new(instance).ok());
+        let instance_ptr = instance_c
+            .as_ref()
+            .map_or(ptr::null(), |instance| instance.as_ptr());
+
+        let dest =
+            unsafe { bindings::cupsGetNamedDest(ptr::null_mut(), name_c.as_ptr(), instance_ptr) };
+
+        if dest.is_null() {
+            return None;
+        }
+
+        let destination = unsafe { Destination::from_raw(dest) }.ok();
+        unsafe { bindings::cupsFreeDests(1, dest) };
+        destination
+    }
+
+    /// Get the name of the destination CUPS would print to by default
+    ///
+    /// Follows libcups' own precedence (`$LPDEST`/`$PRINTER`, user lpoptions, system
+    /// lpoptions, scheduler default) instead of just reading the user's file.
+    pub fn default_destination_name() -> Option<String> {
+        let dest = unsafe { bindings::cupsGetNamedDest(ptr::null_mut(), ptr::null(), ptr::null()) };
+
+        if dest.is_null() {
+            return None;
+        }
+
+        let named = unsafe { &*dest };
+        let name = if named.name.is_null() {
+            None
+        } else {
+            let name = unsafe { CStr::from_ptr(named.name) }
+                .to_string_lossy()
+                .into_owned();
+
+            Some(if named.instance.is_null() {
+                name
+            } else {
+                let instance = unsafe { CStr::from_ptr(named.instance) }.to_string_lossy();
+                format!("{name}/{instance}")
+            })
+        };
+
+        unsafe { bindings::cupsFreeDests(1, dest) };
+
+        name.filter(|name| !name.is_empty())
+    }
+
+    /// Set one saved option on a destination
+    pub fn set_destination_option(
+        &mut self,
+        name: &str,
+        instance: Option<&str>,
+        option: &str,
+        value: &str,
+    ) -> Result<()> {
+        let option_c = CString::new(option)?;
+        let value_c = CString::new(value)?;
+
+        // cupsAddDest only adds an entry to edit, not a queue
+        self.add_destination(name, instance)?;
+
+        let found = self.with_destination(name, instance, |dest| unsafe {
+            dest.num_options = bindings::cupsAddOption(
+                option_c.as_ptr(),
+                value_c.as_ptr(),
+                dest.num_options,
+                &mut dest.options,
+            );
+        });
+
+        if found {
+            Ok(())
+        } else {
+            Err(Error::DestinationNotFound(name.to_string()))
+        }
+    }
+
+    /// Clear the default destination, leaving none marked
+    pub fn clear_default_destination(&mut self) {
+        for index in 0..count_to_usize(self.num_dests) {
+            unsafe {
+                (*self.dests.add(index)).is_default = raw_is_default(false);
+            }
+        }
+    }
+
+    /// Run `edit` against the named destination in this list
+    fn with_destination(
+        &mut self,
+        name: &str,
+        instance: Option<&str>,
+        edit: impl FnOnce(&mut bindings::cups_dest_s),
+    ) -> bool {
+        let Ok(name_c) = CString::new(name) else {
+            return false;
+        };
+        let instance_c = instance.and_then(|instance| CString::new(instance).ok());
+        let instance_ptr = instance_c
+            .as_ref()
+            .map(|value| value.as_ptr())
+            .unwrap_or(ptr::null());
+
+        let dest = unsafe {
+            bindings::cupsGetDest(name_c.as_ptr(), instance_ptr, self.num_dests, self.dests)
+        };
+
+        if dest.is_null() {
+            return false;
+        }
+
+        edit(unsafe { &mut *dest });
+        true
+    }
+
     /// Find a destination by name and instance
     ///
     /// # Arguments
@@ -1167,6 +1286,11 @@ pub fn find_destinations(type_filter: u32, mask: u32) -> Result<Vec<Destination>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_named_destination_not_found() {
+        assert!(Destinations::named_destination("no-such-printer-at-all", None).is_none());
+    }
 
     #[test]
     fn test_destination_creation() {
