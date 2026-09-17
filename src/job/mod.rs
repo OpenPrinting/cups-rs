@@ -27,17 +27,24 @@ pub const FORMAT_JPEG: &str = "image/jpeg";
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: i32,
-    pub dest_name: String,
     pub title: String,
+    /// Destination this job was created for, kept instead of looked up again by name
+    dest: Destination,
 }
 
 impl Job {
-    pub fn new(id: i32, dest_name: String, title: String) -> Self {
-        Job {
-            id,
-            dest_name,
-            title,
-        }
+    pub fn new(id: i32, dest: Destination, title: String) -> Self {
+        Job { id, title, dest }
+    }
+
+    /// Returns the name of the destination this job was created for
+    pub fn dest_name(&self) -> &str {
+        &self.dest.name
+    }
+
+    /// Returns the destination this job was created for
+    pub fn destination(&self) -> &Destination {
+        &self.dest
     }
 
     pub fn submit_file<P: AsRef<Path>>(&self, file_path: P, format: &str) -> Result<()> {
@@ -60,7 +67,7 @@ impl Job {
             )));
         }
 
-        validate_document_format(format, &self.dest_name)?;
+        validate_document_format(format, self.dest_name())?;
 
         let metadata = path.metadata().map_err(|e| {
             Error::DocumentSubmissionFailed(format!("Cannot access file metadata: {}", e))
@@ -98,18 +105,10 @@ impl Job {
         options: &[(String, String)],
         last_document: bool,
     ) -> Result<()> {
-        validate_document_format(format, &self.dest_name)?;
+        validate_document_format(format, self.dest_name())?;
         check_document_size(data.len(), None)?;
 
-        let dest = crate::get_destination(&self.dest_name)?;
-
-        if !dest.is_accepting_jobs() {
-            return Err(Error::PrinterNotAccepting(
-                self.dest_name.clone(),
-                "Printer is currently not accepting jobs".to_string(),
-            ));
-        }
-
+        let dest = &self.dest;
         let dest_info = dest.get_detailed_info(ptr::null_mut())?;
         let dest_ptr = dest.as_ptr();
 
@@ -177,7 +176,7 @@ impl Job {
 
             return Err(cups_error_to_our_error(
                 "document start",
-                Some(&self.dest_name),
+                Some(self.dest_name()),
             ));
         }
 
@@ -250,20 +249,13 @@ impl Job {
         } else {
             Err(cups_error_to_our_error(
                 "document finish",
-                Some(&self.dest_name),
+                Some(self.dest_name()),
             ))
         }
     }
 }
 
 pub fn create_job(dest: &Destination, title: &str) -> Result<Job> {
-    if !dest.is_accepting_jobs() {
-        return Err(Error::PrinterNotAccepting(
-            dest.name.clone(),
-            "Printer is not accepting new jobs".to_string(),
-        ));
-    }
-
     let title_c = CString::new(title)?;
     let dest_info = dest.get_detailed_info(ptr::null_mut())?;
     let dest_ptr = dest.as_ptr();
@@ -302,7 +294,7 @@ pub fn create_job(dest: &Destination, title: &str) -> Result<Job> {
     }
 
     if status == bindings::ipp_status_e_IPP_STATUS_OK as bindings::ipp_status_t {
-        Ok(Job::new(job_id, dest.name.clone(), title.to_string()))
+        Ok(Job::new(job_id, dest.clone(), title.to_string()))
     } else {
         Err(cups_error_to_our_error("job creation", Some(&dest.name)))
     }
@@ -313,13 +305,6 @@ pub fn create_job_with_options(
     title: &str,
     options: &PrintOptions,
 ) -> Result<Job> {
-    if !dest.is_accepting_jobs() {
-        return Err(Error::PrinterNotAccepting(
-            dest.name.clone(),
-            "Printer is not accepting new jobs".to_string(),
-        ));
-    }
-
     let title_c = CString::new(title)?;
     let dest_info = dest.get_detailed_info(ptr::null_mut())?;
     let dest_ptr = dest.as_ptr();
@@ -380,7 +365,7 @@ pub fn create_job_with_options(
     }
 
     if status == bindings::ipp_status_e_IPP_STATUS_OK as bindings::ipp_status_t {
-        Ok(Job::new(job_id, dest.name.clone(), title.to_string()))
+        Ok(Job::new(job_id, dest.clone(), title.to_string()))
     } else {
         Err(cups_error_to_our_error(
             "job creation with options",

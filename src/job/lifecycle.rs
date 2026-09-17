@@ -6,7 +6,7 @@ use std::ptr;
 
 impl Job {
     pub fn close(&self) -> Result<()> {
-        let dest = crate::get_destination(&self.dest_name)?;
+        let dest = &self.dest;
         let dest_info = dest.get_detailed_info(ptr::null_mut())?;
         let dest_ptr = dest.as_ptr();
 
@@ -44,7 +44,7 @@ impl Job {
     }
 
     pub fn cancel(&self) -> Result<()> {
-        let dest = crate::get_destination(&self.dest_name)?;
+        let dest = &self.dest;
         let dest_ptr = dest.as_ptr();
 
         if dest_ptr.is_null() {

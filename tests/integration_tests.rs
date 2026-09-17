@@ -226,7 +226,7 @@ fn test_integration_job_lifecycle() {
     let job_result = create_job(&printer, "Integration Test Job");
     let job = match job_result {
         Ok(j) => {
-            println!("Created job: {} on printer {}", j.id, j.dest_name);
+            println!("Created job: {} on printer {}", j.id, j.dest_name());
             j
         }
         Err(e) => {
