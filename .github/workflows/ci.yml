@@ -7,10 +7,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-  # CUPS 3 isn't available as a Debian/Ubuntu package yet,
-  # so we build this version from source in the CUPS 3 job.
-  LIBCUPS3_VERSION: v3.0.3
-
 
 jobs:
   # Check formatting
@@ -30,141 +26,86 @@ jobs:
         run: cargo fmt --all -- --check
 
 
-  # Build and test against CUPS 2 and CUPS 3
+  # Build and test across architectures and CUPS releases.
+  #
+  # Matrix: 4 architectures x 3 CUPS releases = 12 combinations.
+  #   architectures: amd64, arm64 (native runners); armhf, riscv64 (QEMU)
+  #   CUPS releases: 2.4.x (distro libcups2-dev), 2.5.x (OpenPrinting/cups
+  #                  master), 3.x (OpenPrinting/libcups master)
+  #
+  # All the per-combination work lives in ci/ci-setup.sh, so the legs differ
+  # only in which CUPS is provided and whether they run under emulation.
+  #
   build:
-    name: Build (${{ matrix.feature }})
-    runs-on: ubuntu-24.04
+    name: Build & Test (${{ matrix.arch }}, ${{ matrix.cups }})
+    runs-on: ${{ matrix.runs-on }}
+    # The source-* legs build CUPS from OpenPrinting @master, an unpinned
+    # moving target: a transient breakage there (e.g. libcups master failing
+    # its own `make install`) reddens the leg through no fault of cups-rs.
+    # Keep the distro system-2x leg required (blocking), but let the
+    # source-@master legs report without blocking. ci-setup.sh annotates each
+    # failure as UPSTREAM-DEP-FAILED vs CUPS-RS-FAILED so a real regression on
+    # these legs is still visible even while non-blocking.
+    continue-on-error: ${{ matrix.cups != 'system-2x' }}
+    # Building CUPS from source under QEMU is slow; allow plenty.
+    timeout-minutes: 360
 
     strategy:
-      # Run both jobs even if one of them fails.
       fail-fast: false
-
       matrix:
-        feature:
-          - force-cups2
-          - force-cups3
+        arch: [amd64, arm64, armhf, riscv64]
+        cups: [system-2x, source-2.5.x, source-3.x]
+        include:
+          - arch: amd64
+            runs-on: ubuntu-24.04
+            use-qemu: false
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+            use-qemu: false
+          - arch: armhf
+            runs-on: ubuntu-24.04
+            use-qemu: true
+            qemu-arch: armv7
+          - arch: riscv64
+            runs-on: ubuntu-24.04
+            use-qemu: true
+            qemu-arch: riscv64
 
     steps:
       - uses: actions/checkout@v4
 
-
-      # Common dependencies
-      #
-      # clang/libclang are needed by bindgen.
-      # pkg-config is used by build.rs to find CUPS.
-      #
-      - name: Install common dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            clang \
-            libclang-dev
-
-
-      # CUPS 2
-      #
-      # CUPS 2 is available directly from Ubuntu.
-      #
-      # The extra packages are needed because cups.pc refers to
-      # gnutls and avahi-client when pkg-config resolves the
-      # full CUPS dependency list.
-      #
-      - name: Install CUPS 2
-        if: matrix.feature == 'force-cups2'
-        run: |
-          sudo apt-get install -y \
-            libcups2-dev \
-            libgnutls28-dev \
-            libavahi-client-dev
-
-
-      # CUPS 3
-      #
-      # CUPS 3 isn't packaged by Ubuntu, so build it from source every run.
-      #
-      - name: Install CUPS 3 dependencies
-        if: matrix.feature == 'force-cups3'
-        run: |
-          sudo apt-get install -y \
-            build-essential \
-            autoconf \
-            libavahi-client-dev \
-            libnss-mdns \
-            libpng-dev \
-            libssl-dev \
-            zlib1g-dev
-
-
-      - name: Build CUPS 3
-        if: matrix.feature == 'force-cups3'
-        run: |
-          git clone \
-            --depth 1 \
-            --recurse-submodules \
-            --shallow-submodules \
-            --branch "$LIBCUPS3_VERSION" \
-            https://github.com/OpenPrinting/libcups.git \
-            "$RUNNER_TEMP/libcups"
-
-          cd "$RUNNER_TEMP/libcups"
-
-          ./configure --prefix="$HOME/.local/libcups3"
-
-          make -j"$(nproc)"
-
-          # CUPS runs ldconfig as part of install, so this needs sudo.
-          sudo make install
-
-          # sudo make install left these owned by root.
-          sudo chown -R "$(id -u):$(id -g)" "$HOME/.local/libcups3"
-
-
-      # CUPS 3 was installed in a custom location, so tell the
-      # build tools where to find it.
-      #
-      # PKG_CONFIG_PATH -> finds cups3.pc
-      # LD_LIBRARY_PATH -> finds libcups3 at runtime
-      # BINDGEN_EXTRA_CLANG_ARGS -> helps bindgen find the headers
-      #
-      - name: Configure CUPS 3 environment
-        if: matrix.feature == 'force-cups3'
-        run: |
-          echo "PKG_CONFIG_PATH=$HOME/.local/libcups3/lib/pkgconfig" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$HOME/.local/libcups3/lib" >> "$GITHUB_ENV"
-          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$HOME/.local/libcups3/include" >> "$GITHUB_ENV"
-
-
-      # Rust
+      # ==========================================
+      # NATIVE EXECUTION (amd64 and arm64)
+      # ==========================================
       - name: Set up Rust
+        if: matrix.use-qemu == false
         uses: dtolnay/rust-toolchain@stable
 
-
-      # Show which CUPS installation pkg-config found.
-      # Useful when debugging the CI.
-      #
-      - name: Check CUPS version
+      - name: Build & Test (Native)
+        if: matrix.use-qemu == false
         run: |
-          pkg-config --modversion cups3 || pkg-config --modversion cups
+          set -ex
+          sh ci/ci-setup.sh deps
+          sh ci/ci-setup.sh cups "${{ matrix.cups }}"
+          sh ci/ci-setup.sh build-test "${{ matrix.cups }}"
 
-
-      # Build
-      #
-      # The feature is intentional. CUPS 2 and CUPS 3 are
-      # mutually exclusive, so we explicitly select one for
-      # each matrix job.
-      #
-      - name: Build
-        run: |
-          cargo build --locked --features ${{ matrix.feature }}
-
-
-      # Tests
-      #
-      # Tests that need a CUPS daemon skip themselves when one
-      # isn't available. We don't start a daemon here because
-      # the destination-discovery tests expect no printers.
-      #
-      - name: Test
-        run: |
-          cargo test --locked --features ${{ matrix.feature }}
+      # ==========================================
+      # EMULATED EXECUTION (armhf and riscv64)
+      # ==========================================
+      - name: Build & Test (Emulated)
+        if: matrix.use-qemu == true
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: ${{ matrix.qemu-arch }}
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update --fix-missing -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata ca-certificates git curl build-essential
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          run: |
+            set -ex
+            . "$HOME/.cargo/env"
+            sh ci/ci-setup.sh deps
+            sh ci/ci-setup.sh cups "${{ matrix.cups }}"
+            sh ci/ci-setup.sh build-test "${{ matrix.cups }}"

@@ -2,30 +2,31 @@
 
 use crate::bindings;
 
-// Destination flags
-#[cfg(cups3)]
+// Destination flags. cups@master has started tagging cups_dest_flags_e like CUPS 3
+// does, so a cups2 build against it needs the same prefixed constant names.
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_NONE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_NONE;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_NONE: u32 = bindings::CUPS_DEST_FLAGS_NONE;
-#[cfg(cups3)]
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_UNCONNECTED: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_UNCONNECTED;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_UNCONNECTED: u32 = bindings::CUPS_DEST_FLAGS_UNCONNECTED;
-#[cfg(cups3)]
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_MORE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_MORE;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_MORE: u32 = bindings::CUPS_DEST_FLAGS_MORE;
-#[cfg(cups3)]
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_REMOVED: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_REMOVED;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_REMOVED: u32 = bindings::CUPS_DEST_FLAGS_REMOVED;
-#[cfg(cups3)]
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_ERROR: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_ERROR;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_ERROR: u32 = bindings::CUPS_DEST_FLAGS_ERROR;
-#[cfg(cups3)]
+#[cfg(any(cups3, cups2_new_enum))]
 pub const DEST_FLAGS_DEVICE: u32 = bindings::cups_dest_flags_e_CUPS_DEST_FLAGS_DEVICE;
-#[cfg(cups2)]
+#[cfg(all(cups2, not(cups2_new_enum)))]
 pub const DEST_FLAGS_DEVICE: u32 = bindings::CUPS_DEST_FLAGS_DEVICE;
 
 // Printer types

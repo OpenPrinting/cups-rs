@@ -1,5 +1,5 @@
 use crate::{Error, Result, bindings};
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ptr;
 use std::slice;
@@ -393,7 +393,7 @@ impl Drop for DnssdServiceResolver {
     }
 }
 
-unsafe extern "C" fn error_callback(cb_data: *mut c_void, message: *const i8) {
+unsafe extern "C" fn error_callback(cb_data: *mut c_void, message: *const c_char) {
     if cb_data.is_null() || message.is_null() {
         return;
     }
@@ -409,9 +409,9 @@ unsafe extern "C" fn browse_callback(
     cb_data: *mut c_void,
     flags: bindings::cups_dnssd_flags_t,
     interface_index: u32,
-    name: *const i8,
-    service_type: *const i8,
-    domain: *const i8,
+    name: *const c_char,
+    service_type: *const c_char,
+    domain: *const c_char,
 ) {
     if cb_data.is_null() || name.is_null() || service_type.is_null() || domain.is_null() {
         return;
@@ -438,8 +438,8 @@ unsafe extern "C" fn resolve_callback(
     cb_data: *mut c_void,
     flags: bindings::cups_dnssd_flags_t,
     interface_index: u32,
-    full_name: *const i8,
-    hostname: *const i8,
+    full_name: *const c_char,
+    hostname: *const c_char,
     port: u16,
     num_txt: usize,
     txt: *mut bindings::cups_option_s,
@@ -491,7 +491,7 @@ unsafe extern "C" fn query_callback(
     cb_data: *mut c_void,
     flags: bindings::cups_dnssd_flags_t,
     interface_index: u32,
-    full_name: *const i8,
+    full_name: *const c_char,
     record_type: u16,
     query_data: *const c_void,
     query_len: u16,
